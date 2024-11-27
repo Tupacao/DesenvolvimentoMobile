@@ -1,6 +1,6 @@
 {
-    "name": "atv_7",
-    "short_name": "atv_7",
+    "name": "app7",
+    "short_name": "app7",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -1,264 +1,302 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:sqflite/sqflite.dart';
+// ignore: depend_on_referenced_packages
+import 'package:path/path.dart';
 
 void main() {
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: Poke(),
-  ));
+  runApp(const App());
 }
 
-class Poke extends StatefulWidget {
-  const Poke({super.key});
+class App extends StatelessWidget {
+  const App({super.key});
 
   @override
-  State<Poke> createState() => _PokeState();
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: Home(),
+    );
+  }
 }
 
-class _PokeState extends State<Poke> {
-  List<String> pokemon = [];
+class Home extends StatefulWidget {
+  const Home({super.key});
 
-  void _findPokemon(String name) async {
-    name = name.toLowerCase();
-    String url = "https://pokeapi.co/api/v2/pokemon/$name";
-    List<String> info = [];
-    try {
-      final resposta = await http.get(Uri.parse(url));
+  @override
+  State<Home> createState() => _HomeState();
+}
 
-      if (resposta.statusCode == 200) {
-        var dados = json.decode(resposta.body);
+class _HomeState extends State<Home> {
+  // Método para recuperar ou abrir o banco de dados
+  _recuperarBD() async {
+    // Obtém o caminho onde o banco de dados será salvo no dispositivo
+    final caminho = await getDatabasesPath();
+    final local = join(caminho, "bancodados.db");
 
-        // Adiciona o nome do Pokémon
-        info.add(dados['forms'][0]['name']);
+    // Abre o banco de dados e cria a tabela 'usuarios' se ainda não existir
+    var retorno = await openDatabase(
+      local,
+      version: 1,
+      onCreate: (db, dbVersaoRecente) {
+        // SQL para criar a tabela 'usuarios' com colunas de ID, nome e idade
+        String sql = "CREATE TABLE usuarios ("
+            "matricula INTEGER, "
+            "nome VARCHAR, idade INTEGER)";
+        db.execute(sql);
+      },
+    );
 
-        // Adiciona a URL da imagem
-        info.add(dados['sprites']['other']['showdown']['front_default']);
+    print("Aberto ${retorno.isOpen.toString()}");
 
-        // Adiciona os tipos do Pokémon à lista
-        for (var i = 0; i < dados['types'].length; i++) {
-          info.add(dados['types'][i]['type']['name']);
-        }
+    return retorno;
+  }
 
-        print(info);
+  // Método para inserir um novo usuário no banco de dados
+  _salvarDados(BuildContext context, String nome, int idade, int matricula) async {
+    Database db = await _recuperarBD();
 
-        // Atualiza o estado para refletir os novos dados na UI
-        setState(() {
-          pokemon = info;
-        });
-      } else {
-        print("Erro na requisição: ${resposta.statusCode}");
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Nome não encontrado'),
-            content: const Text(
-                'Por favor, insira o nome de um Pokémon válido para buscar.'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      print("Erro: $e");
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Erro'),
-          content: const Text(
-              'Algo inesperado aconteceu, tente denovo'),
+    // Dados a serem inseridos, representados como um mapa
+    Map<String, dynamic> dadosUsuario = {
+      "nome": nome,
+      "idade": idade,
+      "matricula": matricula,
+    };
+
+    // Insere os dados na tabela 'usuarios' e retorna o ID do novo registro
+    int id = await db.insert("usuarios", dadosUsuario);
+    print("Salvo $id");
+
+    // Exibe um diálogo para o usuário confirmar que o registro foi salvo
+    _mostrarDialogo(context, "Usuário salvo com sucesso!");
+  }
+
+  // Método para exibir diálogos de confirmação e mensagens
+  _mostrarDialogo(BuildContext context, String mensagem) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Resultado"),
+          content: Text(mensagem),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
               },
-              child: const Text('OK'),
+              child: const Text("OK"),
             ),
           ],
-        ),
-      );
+        );
+      },
+    );
+  }
+
+  // Método para listar todos os usuários armazenados no banco de dados
+  _listarUsuarios() async {
+    Database db = await _recuperarBD();
+    String sql = "SELECT * FROM usuarios";
+    List usuarios = await db.rawQuery(sql);
+
+    // Imprime os dados de cada usuário listado no banco
+    for (var usu in usuarios) {
+      print(
+          " matricula: ${usu['matricula'].toString()} nome: ${usu['nome']} idade: ${usu['idade']}");
     }
   }
 
+  // Método para listar um usuário específico com base no ID
+  _listarUmUsuario(BuildContext context, int matricula) async {
+    Database db = await _recuperarBD();
+
+    // Faz a consulta na tabela 'usuarios' com o ID fornecido
+    List usuarios = await db.query(
+      "usuarios",
+      columns: ["matricula", "nome", "idade"],
+      where: "matricula = ?",
+      whereArgs: [matricula],
+    );
+
+    // Verifica se o usuário existe e exibe um diálogo com as informações
+    if (usuarios.isNotEmpty) {
+      var usuario = usuarios.first;
+      _mostrarDialogo(context,
+          "Matricula: ${usuario['matricula']} \nNome: ${usuario['nome']} \nIdade: ${usuario['idade']}");
+    } else {
+      _mostrarDialogo(context, "Usuário com Matricula $matricula não encontrado.");
+    }
+  }
+
+  // Método para excluir um usuário com base no ID
+  _excluirUsuario(BuildContext context, int matricula) async {
+    Database db = await _recuperarBD();
+
+    // Exclui o registro de acordo com o ID fornecido
+    int retorno = await db.delete(
+      "usuarios",
+      where: "matricula = ?",
+      whereArgs: [matricula],
+    );
+
+    print("Itens excluídos: $retorno");
+
+    // Exibe um diálogo para confirmar a exclusão
+    _mostrarDialogo(context, "Usuário com MAtricula $matricula excluído com sucesso.");
+  }
+
+  // Método para atualizar informações de um usuário existente
+  _atualizarUsuario(
+      BuildContext context, int matricula, String? nome, int? idade) async {
+    Database db = await _recuperarBD();
+
+    // Cria um mapa para atualizar os dados somente dos campos não nulos
+    Map<String, dynamic> dadosUsuario = {};
+    if (nome != null && nome.isNotEmpty) {
+      dadosUsuario["nome"] = nome;
+    }
+    if (idade != null) {
+      dadosUsuario["idade"] = idade;
+    }
+
+    // Realiza a atualização caso existam campos para modificar
+    if (dadosUsuario.isNotEmpty) {
+      int retorno = await db.update(
+        "usuarios",
+        dadosUsuario,
+        where: "matricula = ?",
+        whereArgs: [matricula],
+      );
+
+      print("Itens atualizados: $retorno");
+      _mostrarDialogo(context, "Usuário com matricula $matricula atualizado com sucesso.");
+    } else {
+      _mostrarDialogo(context, "Nenhuma informação para atualizar.");
+    }
+  }
+
+  final TextEditingController _nomeController = TextEditingController();
+  final TextEditingController _idadeController = TextEditingController();
+  final TextEditingController _idController = TextEditingController();
+  final TextEditingController _matriculaController = TextEditingController();
+
   @override
   Widget build(BuildContext context) {
-    TextEditingController name = TextEditingController();
-
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          "Famosos Projeto de Pokemon",
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        centerTitle: true,
-        backgroundColor: const Color.fromARGB(255, 255, 17, 0),
-      ),
-      body: Column(
-        children: [
-          const SizedBox(height: 50),
-          SizedBox(
-            width: 150,
-            height: 150,
-            child: Image.asset('assets/pokeball.png'),
-          ),
-          const SizedBox(height: 50),
-          const Text(
-            "Insira o nome do Pokemon",
-            style: TextStyle(
-              fontSize: 25,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: TextField(
-              controller: name,
-              keyboardType: TextInputType.text,
-              decoration: InputDecoration(
-                hintText: "Exemplo: Pikachu",
-                hintStyle: TextStyle(color: Colors.grey[600]),
-                filled: true,
-                fillColor: Colors.white,
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(
-                      color: Color.fromARGB(255, 255, 17, 0), width: 2),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(
-                      color: Color.fromARGB(255, 255, 17, 0), width: 2),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: () {
-              if (name.text.isNotEmpty) {
-                _findPokemon(name.text);
-              } else {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Campo de texto vazio'),
-                    content: const Text(
-                        'Por favor, insira o nome de um Pokémon para buscar.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                        },
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-              }
-            },
-            style: ButtonStyle(
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                return const Color.fromARGB(255, 255, 17, 0);
-              }),
-              padding: WidgetStateProperty.resolveWith((states) {
-                return const EdgeInsets.symmetric(vertical: 20, horizontal: 50);
-              }),
-              shape: WidgetStateProperty.resolveWith((states) {
-                return RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                );
-              }),
-              elevation: WidgetStateProperty.resolveWith((states) {
-                return 5.0;
-              }),
-            ),
-            child: const Text(
-              "Buscar",
-              style: TextStyle(
-                color: Colors.white, // Cor do texto (branca)
-                fontSize: 18, // Tamanho da fonte
-                fontWeight: FontWeight.bold, // Texto em negrito
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (pokemon.isNotEmpty)
+      body: Container(
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
             Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(255, 255, 17, 0),
-                border: Border.all(
-                  color: Colors.black,
-                  width: 4,
+              margin: const EdgeInsets.all(0.5),
+              width: 300,
+              alignment: Alignment.center,
+              child: TextField(
+                controller: _nomeController,
+                decoration: const InputDecoration(
+                  label: Text("Digite o nome:"),
                 ),
-                borderRadius: BorderRadius.circular(200),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 20),
-                    child: Text(
-                      pokemon[0].toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Container(
-                      width: 150,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        border: Border.all(
-                          color: Colors.black,
-                          width: 4,
-                        ),
-                        borderRadius: BorderRadius.circular(200),
-                      ),
-                      child: Image.network(
-                        pokemon[1],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        for (var tipo in pokemon.sublist(2))
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 5),
-                            child: Text(
-                              "$tipo,",
-                              style: const TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
               ),
             ),
-        ],
+            const Padding(padding: EdgeInsets.all(10)),
+            Container(
+              margin: const EdgeInsets.all(0.5),
+              width: 300,
+              alignment: Alignment.center,
+              child: TextField(
+                controller: _idadeController,
+                decoration: const InputDecoration(
+                  label: Text("Digite a idade:"),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ),
+            const Padding(padding: EdgeInsets.all(10)),
+            Container(
+              margin: const EdgeInsets.all(0.5),
+              width: 300,
+              alignment: Alignment.center,
+              child: TextField(
+                controller: _matriculaController,
+                decoration: const InputDecoration(
+                  label: Text("Digite a matricula:"),
+                ),
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                _salvarDados(context, _nomeController.text,
+                    int.tryParse(_idadeController.text) ?? 0,
+                    int.tryParse(_matriculaController.text) ?? 0);
+              },
+              child: const Text("Salvar um usuário"),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: _listarUsuarios,
+              child: const Text("Listar todos usuários"),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              margin: const EdgeInsets.all(0.5),
+              width: 300,
+              alignment: Alignment.center,
+              child: TextField(
+                controller: _idController,
+                decoration: const InputDecoration(
+                  label: Text(
+                      "Digite a Matricula do usuário para listar/excluir/atualizar:"),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                int? id = int.tryParse(_idController.text);
+                if (id != null) {
+                  _listarUmUsuario(context, id);
+                } else {
+                  _mostrarDialogo(
+                      context, "Por favor, insira uma matricula válido para listar.");
+                }
+              },
+              child: const Text("Listar um usuário"),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                int? id = int.tryParse(_idController.text);
+                if (id != null) {
+                  _excluirUsuario(context, id);
+                } else {
+                  _mostrarDialogo(
+                      context, "Por favor, insira uma matricula válido para excluir.");
+                }
+              },
+              child: const Text("Excluir usuário"),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                int? id = int.tryParse(_idController.text);
+                if (id != null) {
+                  String? nome = _nomeController.text.isNotEmpty
+                      ? _nomeController.text
+                      : null;
+                  int? idade = int.tryParse(_idadeController.text);
+                  _atualizarUsuario(context, id, nome, idade);
+                } else {
+                  _mostrarDialogo(context,
+                      "Por favor, insira uma matricula válido para atualizar.");
+                }
+              },
+              child: const Text("Atualizar usuário"),
+            ),
+          ],
+        ),
       ),
     );
   }
